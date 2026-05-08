@@ -51,23 +51,41 @@
 
 ## 二、数据模型设计
 
-### 2.1 模型配置表 (models)
+### 2.1 端点表 (endpoints)
 
 ```sql
-CREATE TABLE models (
+CREATE TABLE endpoints (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    name        TEXT NOT NULL UNIQUE,          -- 模型别名，如 "cheap"
-    provider    TEXT NOT NULL,                 -- 厂商名，如 "deepseek", "xiaomi", "minimax"
-    model_id    TEXT NOT NULL,                 -- 真实模型ID，如 "deepseek-chat"
+    name        TEXT NOT NULL UNIQUE,          -- 端点名称，如 "deepseek"
     api_base    TEXT NOT NULL,                 -- API基础URL
-    api_key     TEXT NOT NULL,                 -- API密钥（本地明文存储）
-    is_active   BOOLEAN DEFAULT 1,            -- 是否启用
-    max_retries INTEGER DEFAULT 2,            -- 最大重试次数
-    fallback    TEXT,                          -- 备用模型别名
+    api_key     TEXT NOT NULL,                 -- API密钥
+    is_active   BOOLEAN DEFAULT 1,
     created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 ```
+
+### 2.2 模型表 (models)
+
+```sql
+CREATE TABLE models (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT NOT NULL UNIQUE,          -- 模型别名，如 "deepseek-flash"
+    endpoint_id INTEGER NOT NULL,              -- 关联端点
+    model_id    TEXT NOT NULL,                 -- 真实模型ID
+    discovered  BOOLEAN DEFAULT 0,            -- 是否自动发现
+    is_active   BOOLEAN DEFAULT 1,
+    max_retries INTEGER DEFAULT 2,
+    fallback    TEXT,                          -- 备用模型别名
+    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (endpoint_id) REFERENCES endpoints(id)
+);
+```
+
+### 2.3 设计理念
+
+**端点与模型分离**：端点存储 api_base + api_key，模型通过 endpoint_id 引用端点。启动时自动调用 `/v1/models` 发现可用模型（discovered=true），config.yaml 中的显式配置作为路由规则（别名、降级链）。
 
 ### 2.2 请求日志表 (logs)
 
@@ -131,53 +149,59 @@ type ModelConfig struct {
 server:
   host: "127.0.0.1"
   port: 8080
-  admin_port: 8081          # 管理API端口，与路由端口分离
+  admin_port: 8081
 
 storage:
   db_path: "./data/llm-router.db"
-  log_full_content: false   # 是否记录完整请求/响应内容
+  log_full_content: false
 
-models:
-  - name: "default"                # 默认路由，最便宜
-    provider: "minimax"
-    model_id: "minimax-2.7"
+# 端点配置 — 填 api_base 和 api_key，启动时自动发现可用模型
+endpoints:
+  - name: "deepseek"
+    api_base: "https://api.deepseek.com/v1"
+    api_key: "sk-xxx"
+
+  - name: "xiaomi"
+    api_base: "https://api.mimo.xiaomi.com/v1"
+    api_key: "sk-xxx"
+
+  - name: "minimax"
     api_base: "https://api.minimaxi.com/v1"
     api_key: "sk-xxx"
+
+# 模型路由配置 — 引用端点名，指定别名和降级链
+models:
+  - name: "default"
+    endpoint: "minimax"
+    model_id: "minimax-2.7"
     is_active: true
     max_retries: 2
     fallback: "deepseek-flash"
 
-  - name: "deepseek-flash"        # 便宜，性能还行
-    provider: "deepseek"
+  - name: "deepseek-flash"
+    endpoint: "deepseek"
     model_id: "deepseek-v4-flash"
-    api_base: "https://api.deepseek.com/v1"
-    api_key: "sk-xxx"
     is_active: true
     max_retries: 2
     fallback: "deepseek-pro"
 
-  - name: "deepseek-pro"          # 稍贵，性能好
-    provider: "deepseek"
+  - name: "deepseek-pro"
+    endpoint: "deepseek"
     model_id: "deepseek-v4-pro"
-    api_base: "https://api.deepseek.com/v1"
-    api_key: "sk-xxx"
     is_active: true
     max_retries: 1
     fallback: "mimo"
 
-  - name: "mimo"                   # 贵，价格还行
-    provider: "xiaomi"
+  - name: "mimo"
+    endpoint: "xiaomi"
     model_id: "mimo-2.5"
-    api_base: "https://api.mimo.xiaomi.com/v1"
-    api_key: "sk-xxx"
     is_active: true
     max_retries: 1
     fallback: "default"
 
-# 自定义请求头映射
 headers:
-  model_override: "X-Msf-Model"      # 动态覆盖模型
-  session_id: "X-Msf-Session-Id"     # 会话ID
+  model_override: "X-Msf-Model"
+  session_id: "X-Msf-Session-Id"
 ```
 
 ### 3.4 别名解析逻辑
@@ -486,10 +510,17 @@ llm-router/
 - [x] 日志详情 API（包含完整请求/响应内容）
 
 ### 第六步：管理API
+- [x] 端点管理 API（CRUD）
 - [x] 模型管理 API（CRUD + 启用/禁用切换）
+- [x] 模型自动发现 API（触发端点扫描）
 - [x] 统计数据 API（概览 / 模型维度 / 时间序列）
 - [x] 健康检查端点
 - [x] 会话列表 API
+
+### 第六步附：端点发现机制
+- [x] 端点表 + 模型表分离（端点存 key，模型引用端点）
+- [x] 启动时自动调用 /v1/models 发现可用模型
+- [x] 发现的模型标记 discovered=true，默认不启用
 
 ### 第七步：前端管理页面
 - [ ] 项目初始化（Vite + React + shadcn/ui + Tailwind CSS）

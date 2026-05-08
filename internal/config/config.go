@@ -8,10 +8,11 @@ import (
 
 // Config 应用配置
 type Config struct {
-	Server  ServerConfig  `yaml:"server"`
-	Storage StorageConfig `yaml:"storage"`
-	Models  []ModelConfig `yaml:"models"`
-	Headers HeaderConfig  `yaml:"headers"`
+	Server  ServerConfig    `yaml:"server"`
+	Storage StorageConfig   `yaml:"storage"`
+	Endpoints []EndpointConfig `yaml:"endpoints"`
+	Models    []ModelConfig    `yaml:"models"`
+	Headers HeaderConfig    `yaml:"headers"`
 }
 
 // ServerConfig 服务器配置
@@ -27,14 +28,19 @@ type StorageConfig struct {
 	LogFullContent bool   `yaml:"log_full_content"`
 }
 
-// ModelConfig 模型配置
+// EndpointConfig 端点配置
+type EndpointConfig struct {
+	Name   string `json:"name" yaml:"name"`
+	APIBase string `json:"api_base" yaml:"api_base"`
+	APIKey  string `json:"api_key" yaml:"api_key"`
+}
+
+// ModelConfig 模型路由配置
 type ModelConfig struct {
 	ID         int64  `json:"id" yaml:"-"`
 	Name       string `json:"name" yaml:"name"`
-	Provider   string `json:"provider" yaml:"provider"`
-	ModelID    string `json:"model_id" yaml:"model_id"`
-	APIBase    string `json:"api_base" yaml:"api_base"`
-	APIKey     string `json:"api_key" yaml:"api_key"`
+	Endpoint   string `json:"endpoint" yaml:"endpoint"`     // 引用端点名
+	ModelID    string `json:"model_id" yaml:"model_id"`     // 可选，不填则用发现的
 	IsActive   bool   `json:"is_active" yaml:"is_active"`
 	MaxRetries int    `json:"max_retries" yaml:"max_retries"`
 	Fallback   string `json:"fallback" yaml:"fallback"`
@@ -79,4 +85,14 @@ func Load(path string) (*Config, error) {
 	}
 
 	return cfg, nil
+}
+
+// GetEndpoint 根据名称获取端点配置
+func (c *Config) GetEndpoint(name string) *EndpointConfig {
+	for i := range c.Endpoints {
+		if c.Endpoints[i].Name == name {
+			return &c.Endpoints[i]
+		}
+	}
+	return nil
 }

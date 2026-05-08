@@ -4,13 +4,13 @@ import (
 	"log"
 	"time"
 
-	"github.com/unfound/llm-router/internal/config"
+	"github.com/unfound/llm-router/internal/storage"
 )
 
 // FallbackChain 降级链
 type FallbackChain struct {
-	Primary  *config.ModelConfig
-	Fallback *config.ModelConfig
+	Primary  *storage.ModelWithEndpoint
+	Fallback *storage.ModelWithEndpoint
 }
 
 // BuildChain 构建降级链
@@ -20,7 +20,7 @@ func BuildChain(alias string) (*FallbackChain, error) {
 		return nil, err
 	}
 
-	var fallback *config.ModelConfig
+	var fallback *storage.ModelWithEndpoint
 	if primary.Fallback != "" {
 		fallback, _ = ResolveModel(primary.Fallback)
 	}
@@ -32,7 +32,7 @@ func BuildChain(alias string) (*FallbackChain, error) {
 }
 
 // NextModel 获取下一个降级模型
-func (c *FallbackChain) NextModel(current *config.ModelConfig) *config.ModelConfig {
+func (c *FallbackChain) NextModel(current *storage.ModelWithEndpoint) *storage.ModelWithEndpoint {
 	if c.Fallback != nil && current.Name == c.Primary.Name {
 		return c.Fallback
 	}

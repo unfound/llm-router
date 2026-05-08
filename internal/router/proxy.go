@@ -9,12 +9,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/unfound/llm-router/internal/config"
+	"github.com/unfound/llm-router/internal/storage"
 )
 
 // ProxyRequest 代理请求
 type ProxyRequest struct {
-	Model     *config.ModelConfig
+	Model     *storage.ModelWithEndpoint
 	Body      []byte
 	IsStream  bool
 	StartTime time.Time
@@ -32,7 +32,7 @@ type ProxyResponse struct {
 
 // Forward 转发请求到目标 LLM
 func Forward(w http.ResponseWriter, req *ProxyRequest) *ProxyResponse {
-	// 构造目标 URL
+	// 构造目标 URL（从端点信息获取 api_base）
 	targetURL := strings.TrimRight(req.Model.APIBase, "/") + "/chat/completions"
 
 	// 创建转发请求

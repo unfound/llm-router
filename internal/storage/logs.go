@@ -2,11 +2,8 @@ package storage
 
 import (
 	"database/sql"
-	"fmt"
 	"strings"
 	"time"
-
-	"github.com/unfound/llm-router/internal/config"
 )
 
 // LogEntry 日志条目
@@ -293,26 +290,4 @@ func ExtractSummary(body []byte, maxLen int) string {
 		}
 	}
 	return s
-}
-
-// InitFromConfig 从配置文件初始化模型数据
-func InitFromConfig(models []config.ModelConfig) error {
-	ms := NewModelStorage()
-	existing, err := ms.GetAll()
-	if err != nil {
-		return err
-	}
-
-	// 如果数据库已有数据，跳过
-	if len(existing) > 0 {
-		return nil
-	}
-
-	// 从配置文件导入
-	for _, m := range models {
-		if err := ms.Create(&m); err != nil {
-			return fmt.Errorf("导入模型 %s 失败: %w", m.Name, err)
-		}
-	}
-	return nil
 }

@@ -38,20 +38,32 @@ func GetDB() *sql.DB {
 
 // createTables 创建数据库表
 func createTables() error {
-	// 模型配置表
+	// 端点表
+	endpointsTable := `
+	CREATE TABLE IF NOT EXISTS endpoints (
+		id          INTEGER PRIMARY KEY AUTOINCREMENT,
+		name        TEXT NOT NULL UNIQUE,
+		api_base    TEXT NOT NULL,
+		api_key     TEXT NOT NULL,
+		is_active   BOOLEAN DEFAULT 1,
+		created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+	);`
+
+	// 模型表（引用端点）
 	modelsTable := `
 	CREATE TABLE IF NOT EXISTS models (
 		id          INTEGER PRIMARY KEY AUTOINCREMENT,
 		name        TEXT NOT NULL UNIQUE,
-		provider    TEXT NOT NULL,
+		endpoint_id INTEGER NOT NULL,
 		model_id    TEXT NOT NULL,
-		api_base    TEXT NOT NULL,
-		api_key     TEXT NOT NULL,
+		discovered  BOOLEAN DEFAULT 0,
 		is_active   BOOLEAN DEFAULT 1,
 		max_retries INTEGER DEFAULT 2,
 		fallback    TEXT,
 		created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
-		updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+		updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (endpoint_id) REFERENCES endpoints(id)
 	);`
 
 	// 请求日志表
@@ -74,15 +86,15 @@ func createTables() error {
 		created_at      DATETIME DEFAULT CURRENT_TIMESTAMP
 	);`
 
-	if _, err := db.Exec(modelsTable); err != nil {
-		return err
-	}
-	if _, err := db.Exec(logsTable); err != nil {
-		return err
+	for _, stmt := range []string{endpointsTable, modelsTable, logsTable} {
+		if _, err := db.Exec(stmt); err != nil {
+			return err
+		}
 	}
 
 	// 创建索引
 	indexes := []string{
+		`CREATE INDEX IF NOT EXISTS idx_models_endpoint ON models(endpoint_id);`,
 		`CREATE INDEX IF NOT EXISTS idx_logs_session ON logs(session_id);`,
 		`CREATE INDEX IF NOT EXISTS idx_logs_model ON logs(model_name);`,
 		`CREATE INDEX IF NOT EXISTS idx_logs_created ON logs(created_at);`,

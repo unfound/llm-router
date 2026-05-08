@@ -64,7 +64,7 @@ func ChatCompletions(cfg *config.Config) gin.HandlerFunc {
 		var resp *router.ProxyResponse
 
 		for current != nil {
-			log.Printf("转发请求: %s -> %s/%s", reqBody.Model, current.Provider, current.ModelID)
+			log.Printf("转发请求: %s -> %s/%s", reqBody.Model, current.EndpointName, current.ModelID)
 
 			// 创建日志记录（初始状态）
 			logEntry := &storage.LogEntry{
@@ -128,7 +128,7 @@ func ChatCompletions(cfg *config.Config) gin.HandlerFunc {
 			// 尝试降级
 			next := chain.NextModel(current)
 			if next != nil {
-				log.Printf("降级: %s -> %s/%s", current.Name, next.Provider, next.ModelID)
+				log.Printf("降级: %s -> %s/%s", current.Name, next.EndpointName, next.ModelID)
 				current = next
 			} else {
 				break
@@ -159,7 +159,7 @@ func ListModels(cfg *config.Config) gin.HandlerFunc {
 				data = append(data, gin.H{
 					"id":       m.Name,
 					"object":   "model",
-					"owned_by": m.Provider,
+					"owned_by": m.EndpointName,
 				})
 			}
 		}

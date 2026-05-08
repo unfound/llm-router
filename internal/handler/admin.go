@@ -6,8 +6,64 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/unfound/llm-router/internal/config"
+	"github.com/unfound/llm-router/internal/discovery"
 	"github.com/unfound/llm-router/internal/storage"
 )
+
+// AdminListEndpoints 管理接口 - 获取端点列表
+func AdminListEndpoints(cfg *config.Config) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		es := storage.NewEndpointStorage()
+		endpoints, err := es.GetAll()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"endpoints": endpoints})
+	}
+}
+
+// AdminCreateEndpoint 管理接口 - 创建端点
+func AdminCreateEndpoint(cfg *config.Config) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var ep storage.EndpointEntry
+		if err := c.ShouldBindJSON(&ep); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		es := storage.NewEndpointStorage()
+		if err := es.Create(&ep); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusCreated, gin.H{"message": "端点创建成功", "endpoint": ep})
+	}
+}
+
+// AdminDeleteEndpoint 管理接口 - 删除端点
+func AdminDeleteEndpoint(cfg *config.Config) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "无效的端点ID"})
+			return
+		}
+		es := storage.NewEndpointStorage()
+		if err := es.Delete(id); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"message": "端点删除成功"})
+	}
+}
+
+// AdminSyncModels 管理接口 - 触发模型发现
+func AdminSyncModels(cfg *config.Config) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		go discovery.SyncAll()
+		c.JSON(http.StatusOK, gin.H{"message": "模型发现已触发，请稍后查看结果"})
+	}
+}
 
 // AdminListModels 管理接口 - 获取模型列表
 func AdminListModels(cfg *config.Config) gin.HandlerFunc {
@@ -18,16 +74,14 @@ func AdminListModels(cfg *config.Config) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{
-			"models": models,
-		})
+		c.JSON(http.StatusOK, gin.H{"models": models})
 	}
 }
 
 // AdminCreateModel 管理接口 - 创建模型
 func AdminCreateModel(cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		var model config.ModelConfig
+		var model storage.ModelEntry
 		if err := c.ShouldBindJSON(&model); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
@@ -37,10 +91,7 @@ func AdminCreateModel(cfg *config.Config) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		c.JSON(http.StatusCreated, gin.H{
-			"message": "模型创建成功",
-			"model":   model,
-		})
+		c.JSON(http.StatusCreated, gin.H{"message": "模型创建成功", "model": model})
 	}
 }
 
@@ -52,7 +103,7 @@ func AdminUpdateModel(cfg *config.Config) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "无效的模型ID"})
 			return
 		}
-		var model config.ModelConfig
+		var model storage.ModelEntry
 		if err := c.ShouldBindJSON(&model); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
@@ -63,10 +114,7 @@ func AdminUpdateModel(cfg *config.Config) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{
-			"message": "模型更新成功",
-			"model":   model,
-		})
+		c.JSON(http.StatusOK, gin.H{"message": "模型更新成功", "model": model})
 	}
 }
 
@@ -83,10 +131,7 @@ func AdminDeleteModel(cfg *config.Config) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{
-			"message": "模型删除成功",
-			"id":      id,
-		})
+		c.JSON(http.StatusOK, gin.H{"message": "模型删除成功"})
 	}
 }
 
@@ -103,9 +148,7 @@ func AdminToggleModel(cfg *config.Config) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{
-			"message": "状态切换成功",
-		})
+		c.JSON(http.StatusOK, gin.H{"message": "状态切换成功"})
 	}
 }
 
@@ -144,9 +187,7 @@ func AdminStatsModels(cfg *config.Config) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{
-			"models": stats,
-		})
+		c.JSON(http.StatusOK, gin.H{"models": stats})
 	}
 }
 
@@ -157,16 +198,13 @@ func AdminStatsTimeSeries(cfg *config.Config) gin.HandlerFunc {
 		if h, err := strconv.Atoi(c.DefaultQuery("hours", "24")); err == nil {
 			hours = h
 		}
-
 		ls := storage.NewLogStorage()
 		points, err := ls.GetTimeSeries(hours)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{
-			"timeseries": points,
-		})
+		c.JSON(http.StatusOK, gin.H{"timeseries": points})
 	}
 }
 
@@ -179,8 +217,6 @@ func AdminSessions(cfg *config.Config) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{
-			"sessions": sessions,
-		})
+		c.JSON(http.StatusOK, gin.H{"sessions": sessions})
 	}
 }
