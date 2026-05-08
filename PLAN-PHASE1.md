@@ -14,7 +14,7 @@
 | 后端框架 | Go (Gin/Fiber) | 轻量高性能，适合网关类服务 |
 | 数据存储 | SQLite | 零依赖，本地单文件数据库，个人使用绰绰有余 |
 | 配置管理 | YAML + 热加载 | 人类可读，支持运行时修改 |
-| 前端管理 | Vue 3 + Vite + Element Plus | 轻量，组件丰富，个人管理够用 |
+| 前端管理 | React + Vite + shadcn/ui + Tailwind CSS | 现代化组件库，主题定制灵活 |
 | 日志存储 | SQLite（结构化日志） | 统一存储，方便查询 |
 
 ### 1.2 系统架构图
@@ -42,7 +42,7 @@
         ┌──────────────┼──────────────┐
         ▼              ▼              ▼
    ┌─────────┐   ┌─────────┐   ┌─────────┐
-   │ OpenAI  │   │ Claude  │   │  DeepSeek│
+   │DeepSeek │   │  Mimo   │   │ MiniMax │
    │   API   │   │   API   │   │   API   │
    └─────────┘   └─────────┘   └─────────┘
 ```
@@ -57,8 +57,8 @@
 CREATE TABLE models (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     name        TEXT NOT NULL UNIQUE,          -- 模型别名，如 "cheap"
-    provider    TEXT NOT NULL,                 -- 厂商名，如 "openai", "anthropic"
-    model_id    TEXT NOT NULL,                 -- 真实模型ID，如 "gpt-4o-mini"
+    provider    TEXT NOT NULL,                 -- 厂商名，如 "deepseek", "xiaomi", "minimax"
+    model_id    TEXT NOT NULL,                 -- 真实模型ID，如 "deepseek-chat"
     api_base    TEXT NOT NULL,                 -- API基础URL
     api_key     TEXT NOT NULL,                 -- API密钥（本地明文存储）
     is_active   BOOLEAN DEFAULT 1,            -- 是否启用
@@ -138,29 +138,38 @@ storage:
   log_full_content: false   # 是否记录完整请求/响应内容
 
 models:
+  - name: "default"
+    provider: "deepseek"
+    model_id: "deepseek-chat"
+    api_base: "https://api.deepseek.com/v1"
+    api_key: "sk-xxx"
+    is_active: true
+    max_retries: 2
+    fallback: "mimo"
+
   - name: "cheap"
-    provider: "openai"
-    model_id: "gpt-4o-mini"
-    api_base: "https://api.openai.com/v1"
+    provider: "deepseek"
+    model_id: "deepseek-v4-flash"
+    api_base: "https://api.deepseek.com/v1"
     api_key: "sk-xxx"
     is_active: true
     max_retries: 2
     fallback: "default"
 
-  - name: "default"
-    provider: "openai"
-    model_id: "gpt-4o"
-    api_base: "https://api.openai.com/v1"
+  - name: "mimo"
+    provider: "xiaomi"
+    model_id: "mimo-v2.5"
+    api_base: "https://api.mimo.xiaomi.com/v1"
     api_key: "sk-xxx"
     is_active: true
     max_retries: 1
-    fallback: null
+    fallback: "default"
 
-  - name: "claude"
-    provider: "anthropic"
-    model_id: "claude-sonnet-4-20250514"
-    api_base: "https://api.anthropic.com"
-    api_key: "sk-ant-xxx"
+  - name: "minimax"
+    provider: "minimax"
+    model_id: "MiniMax-Text-01"
+    api_base: "https://api.minimaxi.com/v1"
+    api_key: "sk-xxx"
     is_active: true
     max_retries: 1
     fallback: "default"
@@ -178,7 +187,7 @@ headers:
     ↓
 查找 models 表 WHERE name = "cheap" AND is_active = 1
     ↓
-返回: { provider: "openai", model_id: "gpt-4o-mini", api_base: "...", api_key: "..." }
+返回: { provider: "deepseek", model_id: "deepseek-v4-flash", api_base: "https://api.deepseek.com/v1", api_key: "..." }
     ↓
 如果找不到 → 返回 404 错误，附带可用模型列表
 ```
@@ -301,7 +310,7 @@ type FallbackChain struct {
 
 | 请求头 | 说明 | 示例 |
 |--------|------|------|
-| `X-Msf-Model` | 动态覆盖模型（可选） | `cheap` 或 `gpt-4o` |
+| `X-Msf-Model` | 动态覆盖模型（可选） | `cheap` 或 `mimo` |
 | `X-Msf-Session-Id` | 会话ID关联（可选） | `session-abc-123` |
 | `Authorization` | 透传给后端（可选，如不填则用配置的key） | `Bearer sk-xxx` |
 
@@ -362,7 +371,7 @@ type FallbackChain struct {
 ### 6.2 页面结构
 
 ```
-管理页面 (Vue 3 SPA)
+管理页面 (React SPA)
 ├── 看板页 (Dashboard)
 │   ├── 今日请求总量 / 成功失败比
 │   ├── 平均延迟 / 总Token消耗
@@ -425,14 +434,14 @@ llm-router/
 │       └── logging.go           # 请求日志中间件
 ├── web/                         # 前端管理页面
 │   ├── src/
-│   │   ├── views/
-│   │   │   ├── Dashboard.vue    # 看板页
-│   │   │   ├── Models.vue       # 模型管理
-│   │   │   ├── Logs.vue         # 日志页
-│   │   │   └── Stats.vue        # 统计页
+│   │   ├── pages/
+│   │   │   ├── Dashboard.tsx    # 看板页
+│   │   │   ├── Models.tsx       # 模型管理
+│   │   │   ├── Logs.tsx         # 日志页
+│   │   │   └── Stats.tsx        # 统计页
 │   │   ├── api/
 │   │   │   └── admin.ts         # 管理API封装
-│   │   └── App.vue
+│   │   └── App.tsx
 │   ├── index.html
 │   └── package.json
 ├── data/                        # 数据目录（git忽略）
@@ -481,7 +490,7 @@ llm-router/
 - [ ] 健康检查端点
 
 ### 第七步：前端管理页面
-- [ ] 项目初始化（Vite + Vue3 + Element Plus）
+- [ ] 项目初始化（Vite + React + shadcn/ui + Tailwind CSS）
 - [ ] 看板页
 - [ ] 模型管理页
 - [ ] 日志页
