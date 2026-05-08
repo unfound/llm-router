@@ -5,6 +5,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -55,6 +56,9 @@ func ChatCompletions(cfg *config.Config) gin.HandlerFunc {
 			return
 		}
 
+		// 提取请求摘要
+		requestSummary := storage.ExtractSummary(body, 200)
+
 		// 尝试主模型 + 降级
 		current := chain.Primary
 		var resp *router.ProxyResponse
@@ -64,10 +68,16 @@ func ChatCompletions(cfg *config.Config) gin.HandlerFunc {
 
 			// 创建日志记录（初始状态）
 			logEntry := &storage.LogEntry{
-				ModelName:  current.ModelID,
-				AliasName:  reqBody.Model,
-				Status:     "pending",
-				CreatedAt:  startTime.Format("2006-01-02 15:04:05"),
+				ModelName:      current.ModelID,
+				AliasName:      reqBody.Model,
+				RequestSummary: requestSummary,
+				Status:         "pending",
+				CreatedAt:      startTime.Format("2006-01-02 15:04:05"),
+			}
+
+			// 完整请求内容（根据配置决定是否记录）
+			if cfg.Storage.LogFullContent {
+				logEntry.RequestBody = string(body)
 			}
 
 			// 带重试的转发
@@ -94,6 +104,15 @@ func ChatCompletions(cfg *config.Config) gin.HandlerFunc {
 				logEntry.TotalTokens = resp.TotalTokens
 				logEntry.LatencyMs = int(resp.LatencyMs)
 				logEntry.Status = "success"
+
+				// 提取响应摘要
+				if len(resp.Body) > 0 {
+					logEntry.ResponseSummary = storage.ExtractSummary(resp.Body, 200)
+					if cfg.Storage.LogFullContent {
+						logEntry.ResponseBody = string(resp.Body)
+					}
+				}
+
 				ls := storage.NewLogStorage()
 				ls.Create(logEntry)
 				return
@@ -158,4 +177,54 @@ type HTTPError struct {
 
 func (e *HTTPError) Error() string {
 	return "HTTP 错误: " + http.StatusText(e.StatusCode)
+}
+
+// AdminListLogs 管理接口 - 获取日志列表
+func AdminListLogs(cfg *config.Config) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		filter := &storage.LogFilter{
+			SessionID: c.Query("session_id"),
+			ModelName: c.Query("model_name"),
+			Status:    c.Query("status"),
+			Limit:     20,
+			Offset:    0,
+		}
+
+		if l, err := strconv.Atoi(c.DefaultQuery("limit", "20")); err == nil {
+			filter.Limit = l
+		}
+		if o, err := strconv.Atoi(c.DefaultQuery("offset", "0")); err == nil {
+			filter.Offset = o
+		}
+
+		ls := storage.NewLogStorage()
+		logs, total, err := ls.List(filter)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"logs":  logs,
+			"total": total,
+		})
+	}
+}
+
+// AdminGetLog 管理接口 - 获取日志详情
+func AdminGetLog(cfg *config.Config) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "无效的日志ID"})
+			return
+		}
+
+		ls := storage.NewLogStorage()
+		entry, err := ls.GetByID(id)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "日志不存在"})
+			return
+		}
+		c.JSON(http.StatusOK, entry)
+	}
 }

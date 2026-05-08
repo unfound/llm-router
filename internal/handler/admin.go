@@ -90,24 +90,21 @@ func AdminDeleteModel(cfg *config.Config) gin.HandlerFunc {
 	}
 }
 
-// AdminListLogs 管理接口 - 获取日志列表
-func AdminListLogs(cfg *config.Config) gin.HandlerFunc {
+// AdminToggleModel 管理接口 - 切换模型启用状态
+func AdminToggleModel(cfg *config.Config) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		sessionID := c.Query("session_id")
-		modelName := c.Query("model_name")
-		status := c.Query("status")
-		limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
-		offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
-
-		ls := storage.NewLogStorage()
-		logs, total, err := ls.List(sessionID, modelName, status, limit, offset)
+		id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "无效的模型ID"})
+			return
+		}
+		ms := storage.NewModelStorage()
+		if err := ms.ToggleActive(id); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{
-			"logs":  logs,
-			"total": total,
+			"message": "状态切换成功",
 		})
 	}
 }
@@ -121,12 +118,69 @@ func AdminStatsOverview(cfg *config.Config) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
+
+		successRate := 0.0
+		if totalRequests > 0 {
+			successRate = float64(successCount) / float64(totalRequests) * 100
+		}
+
 		c.JSON(http.StatusOK, gin.H{
 			"total_requests": totalRequests,
 			"success_count":  successCount,
 			"fail_count":     failCount,
+			"success_rate":   successRate,
 			"avg_latency_ms": avgLatency,
 			"total_tokens":   totalTokens,
+		})
+	}
+}
+
+// AdminStatsModels 管理接口 - 按模型维度统计
+func AdminStatsModels(cfg *config.Config) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ls := storage.NewLogStorage()
+		stats, err := ls.GetModelStats()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"models": stats,
+		})
+	}
+}
+
+// AdminStatsTimeSeries 管理接口 - 时间序列数据
+func AdminStatsTimeSeries(cfg *config.Config) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		hours := 24
+		if h, err := strconv.Atoi(c.DefaultQuery("hours", "24")); err == nil {
+			hours = h
+		}
+
+		ls := storage.NewLogStorage()
+		points, err := ls.GetTimeSeries(hours)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"timeseries": points,
+		})
+	}
+}
+
+// AdminSessions 管理接口 - 获取会话列表
+func AdminSessions(cfg *config.Config) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ls := storage.NewLogStorage()
+		sessions, err := ls.GetSessions()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"sessions": sessions,
 		})
 	}
 }

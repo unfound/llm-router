@@ -74,12 +74,19 @@ func startAdminServer(cfg *config.Config) {
 	r.POST("/admin/api/models", handler.AdminCreateModel(cfg))
 	r.PUT("/admin/api/models/:id", handler.AdminUpdateModel(cfg))
 	r.DELETE("/admin/api/models/:id", handler.AdminDeleteModel(cfg))
+	r.PUT("/admin/api/models/:id/toggle", handler.AdminToggleModel(cfg))
 
 	// 日志查询 API
 	r.GET("/admin/api/logs", handler.AdminListLogs(cfg))
+	r.GET("/admin/api/logs/:id", handler.AdminGetLog(cfg))
 
 	// 统计 API
 	r.GET("/admin/api/stats/overview", handler.AdminStatsOverview(cfg))
+	r.GET("/admin/api/stats/models", handler.AdminStatsModels(cfg))
+	r.GET("/admin/api/stats/timeseries", handler.AdminStatsTimeSeries(cfg))
+
+	// 会话追踪 API
+	r.GET("/admin/api/sessions", handler.AdminSessions(cfg))
 
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.AdminPort)
 	log.Printf("管理服务启动: %s", addr)

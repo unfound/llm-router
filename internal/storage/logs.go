@@ -2,6 +2,8 @@ package storage
 
 import (
 	"database/sql"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/unfound/llm-router/internal/config"
@@ -24,6 +26,15 @@ type LogEntry struct {
 	RequestBody     string `json:"request_body,omitempty"`
 	ResponseBody    string `json:"response_body,omitempty"`
 	CreatedAt       string `json:"created_at"`
+}
+
+// LogFilter 日志查询过滤条件
+type LogFilter struct {
+	SessionID string
+	ModelName string
+	Status    string
+	Limit     int
+	Offset    int
 }
 
 // LogStorage 日志存储操作
@@ -54,25 +65,25 @@ func (s *LogStorage) Create(entry *LogEntry) error {
 }
 
 // List 查询日志列表
-func (s *LogStorage) List(sessionID, modelName, status string, limit, offset int) ([]LogEntry, int, error) {
+func (s *LogStorage) List(filter *LogFilter) ([]LogEntry, int, error) {
 	query := `SELECT id, session_id, model_name, alias_name, request_tokens, response_tokens, total_tokens, latency_ms, status, error_message, request_summary, response_summary, created_at FROM logs WHERE 1=1`
 	countQuery := `SELECT COUNT(*) FROM logs WHERE 1=1`
 	args := []interface{}{}
 
-	if sessionID != "" {
+	if filter.SessionID != "" {
 		query += ` AND session_id = ?`
 		countQuery += ` AND session_id = ?`
-		args = append(args, sessionID)
+		args = append(args, filter.SessionID)
 	}
-	if modelName != "" {
+	if filter.ModelName != "" {
 		query += ` AND model_name = ?`
 		countQuery += ` AND model_name = ?`
-		args = append(args, modelName)
+		args = append(args, filter.ModelName)
 	}
-	if status != "" {
+	if filter.Status != "" {
 		query += ` AND status = ?`
 		countQuery += ` AND status = ?`
-		args = append(args, status)
+		args = append(args, filter.Status)
 	}
 
 	// 获取总数
@@ -83,7 +94,7 @@ func (s *LogStorage) List(sessionID, modelName, status string, limit, offset int
 
 	// 分页查询
 	query += ` ORDER BY id DESC LIMIT ? OFFSET ?`
-	args = append(args, limit, offset)
+	args = append(args, filter.Limit, filter.Offset)
 
 	rows, err := s.db.Query(query, args...)
 	if err != nil {
@@ -102,7 +113,7 @@ func (s *LogStorage) List(sessionID, modelName, status string, limit, offset int
 	return logs, total, nil
 }
 
-// GetByID 按ID获取日志详情
+// GetByID 按ID获取日志详情（包含完整内容）
 func (s *LogStorage) GetByID(id int64) (*LogEntry, error) {
 	var entry LogEntry
 	err := s.db.QueryRow(`
@@ -116,14 +127,14 @@ func (s *LogStorage) GetByID(id int64) (*LogEntry, error) {
 }
 
 // UpdateResponse 更新日志响应信息
-func (s *LogStorage) UpdateResponse(id int64, responseTokens, totalTokens, latencyMs int, status, errorMessage string) error {
+func (s *LogStorage) UpdateResponse(id int64, responseTokens, totalTokens, latencyMs int, status, errorMessage, responseSummary, responseBody string) error {
 	_, err := s.db.Exec(`
-		UPDATE logs SET response_tokens=?, total_tokens=?, latency_ms=?, status=?, error_message=? WHERE id=?
-	`, responseTokens, totalTokens, latencyMs, status, errorMessage, id)
+		UPDATE logs SET response_tokens=?, total_tokens=?, latency_ms=?, status=?, error_message=?, response_summary=?, response_body=? WHERE id=?
+	`, responseTokens, totalTokens, latencyMs, status, errorMessage, responseSummary, responseBody, id)
 	return err
 }
 
-// GetStats 获取统计信息
+// GetStats 获取全局统计
 func (s *LogStorage) GetStats() (totalRequests int, successCount int, failCount int, avgLatency float64, totalTokens int, err error) {
 	err = s.db.QueryRow(`SELECT COUNT(*) FROM logs`).Scan(&totalRequests)
 	if err != nil {
@@ -145,6 +156,145 @@ func (s *LogStorage) GetStats() (totalRequests int, successCount int, failCount 
 	return
 }
 
+// GetModelStats 按模型维度统计
+func (s *LogStorage) GetModelStats() ([]ModelStat, error) {
+	rows, err := s.db.Query(`
+		SELECT 
+			COALESCE(alias_name, model_name) as display_name,
+			COUNT(*) as total,
+			SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) as success,
+			SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed,
+			COALESCE(AVG(CASE WHEN status = 'success' THEN latency_ms END), 0) as avg_latency,
+			COALESCE(SUM(total_tokens), 0) as total_tokens
+		FROM logs 
+		GROUP BY COALESCE(alias_name, model_name)
+		ORDER BY total DESC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var stats []ModelStat
+	for rows.Next() {
+		var stat ModelStat
+		if err := rows.Scan(&stat.Name, &stat.Total, &stat.Success, &stat.Failed, &stat.AvgLatency, &stat.TotalTokens); err != nil {
+			return nil, err
+		}
+		stats = append(stats, stat)
+	}
+	return stats, nil
+}
+
+// ModelStat 模型统计
+type ModelStat struct {
+	Name        string  `json:"name"`
+	Total       int     `json:"total"`
+	Success     int     `json:"success"`
+	Failed      int     `json:"failed"`
+	AvgLatency  float64 `json:"avg_latency"`
+	TotalTokens int     `json:"total_tokens"`
+}
+
+// GetTimeSeries 获取时间序列数据（按小时聚合）
+func (s *LogStorage) GetTimeSeries(hours int) ([]TimeSeriesPoint, error) {
+	// 计算起始时间
+	startTime := time.Now().Add(-time.Duration(hours) * time.Hour).Format("2006-01-02 15:04:05")
+
+	rows, err := s.db.Query(`
+		SELECT 
+			strftime('%Y-%m-%d %H:00', created_at) as hour,
+			COUNT(*) as total,
+			SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) as success,
+			COALESCE(SUM(total_tokens), 0) as tokens
+		FROM logs 
+		WHERE created_at >= ?
+		GROUP BY hour
+		ORDER BY hour
+	`, startTime)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var points []TimeSeriesPoint
+	for rows.Next() {
+		var p TimeSeriesPoint
+		if err := rows.Scan(&p.Hour, &p.Total, &p.Success, &p.Tokens); err != nil {
+			return nil, err
+		}
+		points = append(points, p)
+	}
+	return points, nil
+}
+
+// TimeSeriesPoint 时间序列数据点
+type TimeSeriesPoint struct {
+	Hour    string `json:"hour"`
+	Total   int    `json:"total"`
+	Success int    `json:"success"`
+	Tokens  int    `json:"tokens"`
+}
+
+// GetSessions 获取会话列表
+func (s *LogStorage) GetSessions() ([]SessionInfo, error) {
+	rows, err := s.db.Query(`
+		SELECT 
+			session_id,
+			COUNT(*) as request_count,
+			MIN(created_at) as first_request,
+			MAX(created_at) as last_request
+		FROM logs 
+		WHERE session_id != '' AND session_id IS NOT NULL
+		GROUP BY session_id
+		ORDER BY last_request DESC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var sessions []SessionInfo
+	for rows.Next() {
+		var sess SessionInfo
+		if err := rows.Scan(&sess.SessionID, &sess.RequestCount, &sess.FirstRequest, &sess.LastRequest); err != nil {
+			return nil, err
+		}
+		sessions = append(sessions, sess)
+	}
+	return sessions, nil
+}
+
+// SessionInfo 会话信息
+type SessionInfo struct {
+	SessionID    string `json:"session_id"`
+	RequestCount int    `json:"request_count"`
+	FirstRequest string `json:"first_request"`
+	LastRequest  string `json:"last_request"`
+}
+
+// ExtractSummary 从请求体提取摘要
+func ExtractSummary(body []byte, maxLen int) string {
+	if len(body) == 0 {
+		return ""
+	}
+	s := string(body)
+	if len(s) > maxLen {
+		s = s[:maxLen] + "..."
+	}
+	// 尝试提取 messages 数组中的最后一条消息内容
+	if idx := strings.LastIndex(s, `"content"`); idx > 0 {
+		start := idx + len(`"content":`)
+		if start < len(s) {
+			end := strings.Index(s[start:], `"`)
+			if end > 0 {
+				return s[start : start+end]
+			}
+		}
+	}
+	return s
+}
+
 // InitFromConfig 从配置文件初始化模型数据
 func InitFromConfig(models []config.ModelConfig) error {
 	ms := NewModelStorage()
@@ -161,11 +311,8 @@ func InitFromConfig(models []config.ModelConfig) error {
 	// 从配置文件导入
 	for _, m := range models {
 		if err := ms.Create(&m); err != nil {
-			return err
+			return fmt.Errorf("导入模型 %s 失败: %w", m.Name, err)
 		}
 	}
 	return nil
 }
-
-// 日志创建时间字段
-var _ = time.Now
