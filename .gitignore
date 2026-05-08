@@ -6,6 +6,4 @@ data/
 server
 llm-router
 config.yaml
-web/node_modules/
-web/dist/
 cmd/server/web/
