@@ -3,3 +3,7 @@ data/
 *.db-journal
 *.db-wal
 *.db-shm
+server
+web/node_modules/
+web/dist/
+cmd/server/web/
