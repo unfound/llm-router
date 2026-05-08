@@ -1,8 +1,22 @@
 package router
 
+import (
+	"errors"
+
+	"github.com/unfound/llm-router/internal/config"
+	"github.com/unfound/llm-router/internal/storage"
+)
+
+var (
+	ErrModelNotFound = errors.New("模型不存在或未启用")
+)
+
 // ResolveModel 别名解析 - 将模型别名解析为真实配置
-// TODO: 从数据库查询模型配置
-func ResolveModel(alias string) (provider, modelID, apiBase, apiKey string, err error) {
-	// 临时实现：从配置文件读取
-	return "", "", "", "", nil
+func ResolveModel(alias string) (*config.ModelConfig, error) {
+	ms := storage.NewModelStorage()
+	m, err := ms.GetByName(alias)
+	if err != nil {
+		return nil, ErrModelNotFound
+	}
+	return m, nil
 }
