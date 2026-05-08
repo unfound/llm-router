@@ -138,37 +138,37 @@ storage:
   log_full_content: false   # 是否记录完整请求/响应内容
 
 models:
-  - name: "default"
-    provider: "deepseek"
-    model_id: "deepseek-chat"
-    api_base: "https://api.deepseek.com/v1"
+  - name: "default"                # 默认路由，最便宜
+    provider: "minimax"
+    model_id: "minimax-2.7"
+    api_base: "https://api.minimaxi.com/v1"
     api_key: "sk-xxx"
     is_active: true
     max_retries: 2
-    fallback: "mimo"
+    fallback: "deepseek-flash"
 
-  - name: "cheap"
+  - name: "deepseek-flash"        # 便宜，性能还行
     provider: "deepseek"
     model_id: "deepseek-v4-flash"
     api_base: "https://api.deepseek.com/v1"
     api_key: "sk-xxx"
     is_active: true
     max_retries: 2
-    fallback: "default"
+    fallback: "deepseek-pro"
 
-  - name: "mimo"
-    provider: "xiaomi"
-    model_id: "mimo-v2.5"
-    api_base: "https://api.mimo.xiaomi.com/v1"
+  - name: "deepseek-pro"          # 稍贵，性能好
+    provider: "deepseek"
+    model_id: "deepseek-v4-pro"
+    api_base: "https://api.deepseek.com/v1"
     api_key: "sk-xxx"
     is_active: true
     max_retries: 1
-    fallback: "default"
+    fallback: "mimo"
 
-  - name: "minimax"
-    provider: "minimax"
-    model_id: "MiniMax-Text-01"
-    api_base: "https://api.minimaxi.com/v1"
+  - name: "mimo"                   # 贵，价格还行
+    provider: "xiaomi"
+    model_id: "mimo-2.5"
+    api_base: "https://api.mimo.xiaomi.com/v1"
     api_key: "sk-xxx"
     is_active: true
     max_retries: 1
@@ -187,7 +187,7 @@ headers:
     ↓
 查找 models 表 WHERE name = "cheap" AND is_active = 1
     ↓
-返回: { provider: "deepseek", model_id: "deepseek-v4-flash", api_base: "https://api.deepseek.com/v1", api_key: "..." }
+返回: { provider: "minimax", model_id: "minimax-2.7", api_base: "https://api.minimaxi.com/v1", api_key: "..." }
     ↓
 如果找不到 → 返回 404 错误，附带可用模型列表
 ```
