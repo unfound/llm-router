@@ -2,6 +2,7 @@ package storage
 
 import (
 	"database/sql"
+	"log"
 	"time"
 
 	"github.com/unfound/llm-router/internal/config"
@@ -153,7 +154,8 @@ func (s *ModelStorage) ExistsByEndpointAndModel(endpointID int64, modelID string
 	return count > 0, nil
 }
 
-// InitModelsFromConfig 从配置文件初始化模型路由（仅首次）
+// InitModelsFromConfig 从配置文件同步模型路由（每次启动都执行）
+// 配置里有的：更新路由参数；配置里没有的：保留但标记 inactive
 func InitModelsFromConfig(models []config.ModelConfig) error {
 	ms := NewModelStorage()
 	es := NewEndpointStorage()
@@ -162,29 +164,83 @@ func InitModelsFromConfig(models []config.ModelConfig) error {
 	if err != nil {
 		return err
 	}
-	if len(existing) > 0 {
-		return nil
+
+	// 建立已有模型索引（按 name）
+	existingByName := make(map[string]*ModelWithEndpoint)
+	for i := range existing {
+		existingByName[existing[i].Name] = &existing[i]
 	}
 
+	configNames := make(map[string]bool)
+
 	for _, m := range models {
+		configNames[m.Name] = true
+
 		// 查找端点 ID
 		ep, err := es.GetByName(m.Endpoint)
 		if err != nil {
+			log.Printf("模型 [%s] 跳过: 端点 [%s] 不存在", m.Name, m.Endpoint)
 			continue
 		}
 
-		entry := &ModelEntry{
-			Name:       m.Name,
-			EndpointID: ep.ID,
-			ModelID:    m.ModelID,
-			Discovered: false,
-			IsActive:   m.IsActive,
-			MaxRetries: m.MaxRetries,
-			Fallback:   m.Fallback,
-		}
-		if err := ms.Create(entry); err != nil {
-			return err
+		if old, ok := existingByName[m.Name]; ok {
+			// 已存在：更新 endpoint_id、model_id、路由参数
+			changed := old.EndpointID != ep.ID || old.ModelID != m.ModelID ||
+				old.MaxRetries != m.MaxRetries || old.Fallback != m.Fallback ||
+				!old.IsActive
+			if changed {
+				entry := &ModelEntry{
+					ID:         old.ID,
+					Name:       old.Name,
+					EndpointID: ep.ID,
+					ModelID:    m.ModelID,
+					Discovered: old.Discovered,
+					IsActive:   true,
+					MaxRetries: m.MaxRetries,
+					Fallback:   m.Fallback,
+				}
+				if err := ms.Update(entry); err != nil {
+					return err
+				}
+				log.Printf("模型 [%s] 已更新", m.Name)
+			}
+		} else {
+			// 新增
+			entry := &ModelEntry{
+				Name:       m.Name,
+				EndpointID: ep.ID,
+				ModelID:    m.ModelID,
+				Discovered: false,
+				IsActive:   m.IsActive,
+				MaxRetries: m.MaxRetries,
+				Fallback:   m.Fallback,
+			}
+			if err := ms.Create(entry); err != nil {
+				return err
+			}
+			log.Printf("模型 [%s] 已创建", m.Name)
 		}
 	}
+
+	// 配置文件里不再存在的模型 → 标记 inactive
+	for name, old := range existingByName {
+		if !configNames[name] && old.IsActive {
+			entry := &ModelEntry{
+				ID:         old.ID,
+				Name:       old.Name,
+				EndpointID: old.EndpointID,
+				ModelID:    old.ModelID,
+				Discovered: old.Discovered,
+				IsActive:   false,
+				MaxRetries: old.MaxRetries,
+				Fallback:   old.Fallback,
+			}
+			if err := ms.Update(entry); err != nil {
+				return err
+			}
+			log.Printf("模型 [%s] 已从配置移除，标记为 inactive", name)
+		}
+	}
+
 	return nil
 }

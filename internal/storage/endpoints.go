@@ -2,6 +2,7 @@ package storage
 
 import (
 	"database/sql"
+	"log"
 	"time"
 
 	"github.com/unfound/llm-router/internal/config"
@@ -107,27 +108,62 @@ func (s *EndpointStorage) Delete(id int64) error {
 	return err
 }
 
-// InitEndpointsFromConfig 从配置文件初始化端点（仅首次）
+// InitEndpointsFromConfig 从配置文件同步端点（每次启动都执行）
+// 配置里有的：更新 api_base/api_key；配置里没有的：保留但标记 inactive
 func InitEndpointsFromConfig(endpoints []config.EndpointConfig) error {
 	es := NewEndpointStorage()
 	existing, err := es.GetAll()
 	if err != nil {
 		return err
 	}
-	if len(existing) > 0 {
-		return nil
+
+	// 建立已有端点索引
+	existingByName := make(map[string]*EndpointEntry)
+	for i := range existing {
+		existingByName[existing[i].Name] = &existing[i]
 	}
 
+	// 配置中的端点名集合
+	configNames := make(map[string]bool)
+
 	for _, ep := range endpoints {
-		entry := &EndpointEntry{
-			Name:     ep.Name,
-			APIBase:  ep.APIBase,
-			APIKey:   ep.APIKey,
-			IsActive: true,
-		}
-		if err := es.Create(entry); err != nil {
-			return err
+		configNames[ep.Name] = true
+		if old, ok := existingByName[ep.Name]; ok {
+			// 已存在：更新 api_base 和 api_key，确保 active
+			if old.APIBase != ep.APIBase || old.APIKey != ep.APIKey || !old.IsActive {
+				old.APIBase = ep.APIBase
+				old.APIKey = ep.APIKey
+				old.IsActive = true
+				if err := es.Update(old); err != nil {
+					return err
+				}
+				log.Printf("端点 [%s] 已更新", ep.Name)
+			}
+		} else {
+			// 新增
+			entry := &EndpointEntry{
+				Name:     ep.Name,
+				APIBase:  ep.APIBase,
+				APIKey:   ep.APIKey,
+				IsActive: true,
+			}
+			if err := es.Create(entry); err != nil {
+				return err
+			}
+			log.Printf("端点 [%s] 已创建", ep.Name)
 		}
 	}
+
+	// 配置文件里不再存在的端点 → 标记 inactive
+	for name, old := range existingByName {
+		if !configNames[name] && old.IsActive {
+			old.IsActive = false
+			if err := es.Update(old); err != nil {
+				return err
+			}
+			log.Printf("端点 [%s] 已从配置移除，标记为 inactive", name)
+		}
+	}
+
 	return nil
 }
