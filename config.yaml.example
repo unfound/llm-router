@@ -1,0 +1,60 @@
+server:
+  host: "127.0.0.1"
+  port: 8080
+  admin_port: 8081
+
+storage:
+  db_path: "./data/llm-router.db"
+  log_full_content: false
+
+# 端点配置 — 填 api_base 和 api_key，启动时自动发现可用模型
+endpoints:
+  - name: "local"
+    api_base: "http://localhost:8888"
+
+  - name: "deepseek"
+    api_base: "https://api.deepseek.com/v1"
+    api_key: "sk-your-deepseek-api-key"
+
+  - name: "xiaomi"
+    api_base: "https://token-plan-cn.xiaomimimo.com/v1"
+    api_key: "tp-your-xiaomi-api-key"
+
+  - name: "minimax"
+    api_base: "https://api.minimaxi.com/v1"
+    api_key: "sk-your-minimax-api-key"
+
+# 模型路由配置 — 引用端点名，指定别名和降级链
+# model_id 可选：不填则用端点自动发现的；填了则显式指定（兜底）
+models:
+  - name: "default"
+    endpoint: "minimax"
+    model_id: "minimax-2.7"
+    is_active: true
+    max_retries: 2
+    fallback: "deepseek-flash"
+
+  - name: "deepseek-flash"
+    endpoint: "deepseek"
+    model_id: "deepseek-v4-flash"
+    is_active: true
+    max_retries: 2
+    fallback: "deepseek-pro"
+
+  - name: "deepseek-pro"
+    endpoint: "deepseek"
+    model_id: "deepseek-v4-pro"
+    is_active: true
+    max_retries: 1
+    fallback: "mimo"
+
+  - name: "mimo"
+    endpoint: "xiaomi"
+    model_id: "mimo-2.5"
+    is_active: true
+    max_retries: 1
+    fallback: "default"
+
+headers:
+  model_override: "X-Msf-Model"
+  session_id: "X-Msf-Session-Id"
