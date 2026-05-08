@@ -1,29 +1,5 @@
-# Binaries
-*.exe
-*.dll
-*.so
-*.dylib
-llm-router
-
-# Data directory
 data/
-
-# Config (contains API keys)
-config.yaml
-
-# Go
-vendor/
-
-# Node
-web/node_modules/
-web/dist/
-
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-
-# OS
-.DS_Store
-Thumbs.db
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
