@@ -33,7 +33,11 @@ type ProxyResponse struct {
 // Forward 转发请求到目标 LLM
 func Forward(w http.ResponseWriter, req *ProxyRequest) *ProxyResponse {
 	// 构造目标 URL（从端点信息获取 api_base）
-	targetURL := strings.TrimRight(req.Model.APIBase, "/") + "/chat/completions"
+	base := strings.TrimRight(req.Model.APIBase, "/")
+	targetURL := base + "/chat/completions"
+	if !strings.HasSuffix(base, "/v1") {
+		targetURL = base + "/v1/chat/completions"
+	}
 
 	// 创建转发请求
 	httpReq, err := http.NewRequest("POST", targetURL, strings.NewReader(string(req.Body)))
@@ -43,7 +47,9 @@ func Forward(w http.ResponseWriter, req *ProxyRequest) *ProxyResponse {
 
 	// 设置请求头
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+req.Model.APIKey)
+	if req.Model.APIKey != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+req.Model.APIKey)
+	}
 
 	// 发送请求
 	client := &http.Client{Timeout: 60 * time.Second}

@@ -14,13 +14,22 @@ import (
 
 // DiscoverModels 从端点自动发现可用模型
 func DiscoverModels(endpoint *storage.EndpointEntry) ([]string, error) {
-	url := strings.TrimRight(endpoint.APIBase, "/") + "/models"
+	base := strings.TrimRight(endpoint.APIBase, "/")
+
+	// 构建发现 URL：如果 api_base 没有 /v1 后缀，自动补全
+	url := base + "/models"
+	if !strings.HasSuffix(base, "/v1") {
+		url = base + "/v1/models"
+	}
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+endpoint.APIKey)
+	// 有 api_key 才加认证头，本地端点通常不需要
+	if endpoint.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+endpoint.APIKey)
+	}
 
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
